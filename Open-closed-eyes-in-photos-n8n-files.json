@@ -1,0 +1,367 @@
+{
+  "name": "Open closed eyes in photos",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Convert binary image to base64 data URL (v1.6 - Added WebP support)\nconst binary = $input.first().binary;\nif (!binary) throw new Error('No binary data found.');\nconst key = Object.keys(binary)[0];\nconst bin = binary[key];\nconst b64 = bin.data;\nconst mime = bin.mimeType || 'image/jpeg';\n\n// Validate file type\nconst validMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];\nif (!validMimeTypes.includes(mime)) {\n  throw new Error('Please upload a valid image file (jpg, jpeg, png, or webp format)');\n}\n\n// Get form data - v1.6: Simplified to single theme field + Mystery Spell\nconst formData = $input.first().json;\nconst selectedTheme = '';\nconst mysterySpell =  '';\n\nreturn [{ \n  json: { \n    imageDataUrl: `data:${mime};base64,${b64}`,\n    holiday: 'eye-fixing',\n    userSelectedTheme: selectedTheme,\n    mysterySpell: mysterySpell.trim()\n  } \n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        1344
+      ],
+      "id": "5592dfc3-a2a4-4695-9418-28889ecb3a61",
+      "name": "Process Image"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Smart theme selection: Random or User Choice (v1.5 - Updated for optional selection)\nconst inputItem = $input.first();\n// const userSelectedTheme = inputItem.json.userSelectedTheme;\n\nlet finalTheme = 'Mysterious Magician';\nlet selectionMethod = 'user_selected';\n\nreturn [{ \n  json: { \n    ...inputItem.json,\n    randomTheme: finalTheme,\n    selectionMethod: selectionMethod\n  } \n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        1344
+      ],
+      "id": "29aa6273-fedf-4c13-9d16-ee7342e49637",
+      "name": "Smart Theme Selector"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Adapt data for MuleRun API format with MAXIMUM identity preservation (v1.5)\nconst inputItem = $input.first();\nconst prompt = inputItem.json.output;\nconst imageData = inputItem.json.imageDataUrl;\nconst holiday = inputItem.json.holiday;\n\n// Validate image data format\nconst mimeMatch = imageData.match(/^data:([^;]+);base64,(.+)$/);\nif (!mimeMatch) {\n  throw new Error('Invalid image data format');\n}\n\nconst mimeType = mimeMatch[1];\nconst base64Data = mimeMatch[2];\n\n// Build MuleRun API content array\nconst content = [];\n\n// Add text prompt\nif (prompt && String(prompt).trim()) {\n  content.push({\n    type: \"text\",\n    text: String(prompt).trim()\n  });\n}\n\n// Add image data\ncontent.push({\n  type: \"image_url\",\n  image_url: { \n    url: imageData \n  }\n});\n\n// Build MuleRun API payload with HD quality and LOWEST style_strength for maximum identity preservation\nconst apiPayload = {\n  model: \"openai/gemini-2.5-flash-image\",\n  messages: [\n    {\n      role: \"user\",\n      content\n    }\n  ],\n  quality: \"hd\",\n  style_strength: 0.5  // Maximum identity/gender/anatomy preservation\n};\n\nreturn [{\n  json: {\n    apiPayload: apiPayload,\n    holiday: holiday,\n    originalPrompt: prompt\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        1344
+      ],
+      "id": "99060555-9f64-43df-b506-cd7a349a5fa7",
+      "name": "MuleRun Data Adapter"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://aillm.sinocache.net/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.apiPayload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1472,
+        1344
+      ],
+      "id": "86832d20-7a88-4c72-b0ff-cc1fad783915",
+      "name": "MuleRun HTTP Request",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetween": 2000,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "StIw0CUDBexSymYS",
+          "name": "Bearer Auth account 2"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "content-filter-check",
+              "leftValue": "={{ $json.choices?.[0]?.finish_reason === 'content_filter' || $json.error?.type === 'content_filter' || $json.error?.code === 'content_policy_violation' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        1296
+      ],
+      "id": "03c0ba81-d65c-461f-b4ad-5444fdaaba56",
+      "name": "Check Content Filter"
+    },
+    {
+      "parameters": {
+        "errorMessage": "Content flagged as inappropriate. Please try a different photo. Ensure the image is suitable for generation."
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1936,
+        1280
+      ],
+      "id": "f6104691-9ac1-4bd1-bd1a-955fae3c5011",
+      "name": "Content Blocked Error"
+    },
+    {
+      "parameters": {
+        "errorMessage": "Photo generation failed. The AI service couldn't create the favorite image. Please try again with a different photo."
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2400,
+        1616
+      ],
+      "id": "1826d35f-de93-4a39-8cf9-9a8607ed8d97",
+      "name": "Generation Failed Error"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract generated image from MuleRun API response (v1.5 - Clean output)\nconst response = $input.first().json;\n\n// Check if response has the expected MuleRun structure\nif (!response.choices?.[0]?.message?.content) {\n  throw new Error('No image generated from the MuleRun API response');\n}\n\n// Find the image_url content item\nconst choice = response.choices[0];\nlet imageData = null;\nlet imageInfo = null;\n\n// Iterate through content array to find image_url\n\nconst contentItem = choice.message.content;\nconst imageUrl    = contentItem.slice(31,-1);\n\ntry {\n    const testBuffer = Buffer.from(imageUrl, 'base64');\n  \n    if (testBuffer.length > 0) {\n      imageData = imageUrl;\n      imageInfo = {\n        mimeType: 'image/png',\n        contentIndex: 0,\n        isBase64: true\n      };\n    }\n} \ncatch (base64Error) {\n      imageInfo=null;\n}\n\nif (!imageData || !imageInfo) {\n  throw new Error('No valid image data found in API response');\n}\n\n// Convert to buffer and prepare binary data\nconst buffer = Buffer.from(imageData, 'base64');\nconst extension = imageInfo.mimeType.split('/')[1] || 'png';\nconst fileName = `open_eyes_photo_ext.${extension}`;\n\n// Prepare binary data using n8n helper\nconst binary = await this.helpers.prepareBinaryData(buffer, fileName, imageInfo.mimeType);\n\n// Generate simple message based on selection method\nlet message = `🎃 Success`;\n\n// Return ONLY image binary data with minimal JSON info\nreturn [{\n  json: {\n    \"Message\": message\n  },\n  binary: {\n    data: binary\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        1360
+      ],
+      "id": "a25618f0-9d21-43d9-b6b0-0cba83c87554",
+      "name": "Process Generated Image",
+      "alwaysOutputData": false,
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "errorMessage": "Failed to generate image. The AI service encountered an error. Please try again."
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        1520
+      ],
+      "id": "b06e4525-c5c3-4bf1-8d28-f911e9d5b6e7",
+      "name": "Image Generation Error"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-costume-image",
+              "leftValue": "={{ $json.choices?.[0]?.message?.content?.some(contentItem => contentItem.type === 'image_url' && contentItem.image_url?.url ) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1936,
+        1536
+      ],
+      "id": "54cec664-e080-4503-8ffa-ff2656ec0811",
+      "name": "Check Image Generated"
+    },
+    {
+      "parameters": {
+        "formTitle": "Open closed Eyes in Photos",
+        "formDescription": "Make your photos look amazing by fixing closed eyes.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Photo",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".jpg,.jpeg,.png,.webp",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        416,
+        1344
+      ],
+      "id": "4b147e9b-246a-498f-b9b0-fd42430bd737",
+      "name": "Open Closed Eyes Form",
+      "webhookId": "3c9d8ed1-6214-4358-b7f2-6940c07b21cd"
+    },
+    {
+      "parameters": {
+        "jsCode": "  // Build the eye-fixing prompt with ABSOLUTE GENDER PRESERVATION (v1.6)\nconst inputItem = $input.first();\nconst theme = 'Mysterious Magician';\nconst imageDataUrl = inputItem.json.imageDataUrl;\nconst selectionMethod = inputItem.json.selectionMethod;\nconst mysterySpell = '';\n\n// Check if user entered the correct Mystery Spell for TrickMule Easter Egg\nconst hasCorrectSpell = '';\n\n// v1.5: ABSOLUTE GENDER PRESERVATION with strongest possible constraints\nconst prompt = `🚨 CRITICAL INSTRUCTION: You MUST preserve the person's EXACT GENDER from the input photo. DO NOT change their gender under ANY circumstances.\n\nTASK & REQUIREMENTS:\nPlease edit only the eye area of the person in the input image with ULTRA HIGH-DEFINITION photorealistic quality. Do not change the person’s identity, hairstyle, face shape, lighting, background, or any other visual details.\nIf the person’s eyes are closed, gently and naturally open them, ensuring the result matches the person’s real eye shape, style, and facial expression.\nIf the eyes are partially closed or distorted, correct them while preserving realism and identity.\nKeep the modifications minimal and realistic, as if the photo was originally taken with the eyes open.\n\n🚨🚨🚨 ABSOLUTE GENDER PRESERVATION RULES (HIGHEST PRIORITY - NEVER VIOLATE):\n1. **GENDER IS SACRED**: The person's gender presentation, body structure, and physical characteristics from the input photo are ABSOLUTE and UNCHANGEABLE\n\n2. **MUST MATCH INPUT**:  Do not change face shape, mouth, hair, skin texture, makeup, clothing, background, or lighting. No exaggerated effects, stylization, cartoon look, smoothing, or identity alteration.\n\n⚠️ CRITICAL IDENTITY & ANATOMY REQUIREMENTS:\n1. MAINTAIN EXACT PHYSICAL IDENTITY: Every physical characteristic from the input photo is sacred and unchangeable\n2. PRESERVE FACIAL IDENTITY: Their exact facial features, skin tone, eye shape, nose, mouth - only modify eyes parts\n3. ANATOMICAL ACCURACY MANDATORY:\n   - Each hand MUST have exactly FIVE fingers (thumb + 4 fingers) with correct proportions\n   - Normal human anatomy: two arms, two legs, correct joint positions\n   - Natural body proportions EXACTLY matching the original person\n\nBACKGROUND:\n- MUST NOT Be Modified\n\n❌❌❌ ABSOLUTELY FORBIDDEN - WILL CAUSE CRITICAL FAILURE:\n- ❌ CHANGING the person's gender or gender presentation (THIS IS THE #1 MOST IMPORTANT RULE)\n- ❌ Feminizing a male body or masculinizing a female body\n- ❌ Applying gender-inappropriate clothing (e.g., putting a man in a dress unless that's clearly their style)\n- ❌ Creating hands with missing/extra/deformed fingers\n- ❌ Altering fundamental facial features beyond costume makeup\n- ❌ Making the person look like a different individual\n- ❌ Using gender-stereotyped clothing that doesn't match their body\n`;\n\nlet finalPrompt = prompt;\n\nreturn [{\n  json: {\n    holiday: 'eye-fixing',\n    selectedCharacter: theme,\n    selectionMethod: selectionMethod,\n    output: finalPrompt,\n    imageDataUrl: imageDataUrl,\n    hasEasterEgg: hasCorrectSpell\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        1344
+      ],
+      "id": "95a97901-141c-4737-9c66-55bc1efe061a",
+      "name": "Quering Prompt Generator"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Process Image": {
+      "main": [
+        [
+          {
+            "node": "Smart Theme Selector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Smart Theme Selector": {
+      "main": [
+        [
+          {
+            "node": "Quering Prompt Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MuleRun Data Adapter": {
+      "main": [
+        [
+          {
+            "node": "MuleRun HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MuleRun HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Check Content Filter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Image Generation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Content Filter": {
+      "main": [
+        [
+          {
+            "node": "Content Blocked Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Image Generated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Image Generated": {
+      "main": [
+        [
+          {
+            "node": "Process Generated Image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generation Failed Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open Closed Eyes Form": {
+      "main": [
+        [
+          {
+            "node": "Process Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quering Prompt Generator": {
+      "main": [
+        [
+          {
+            "node": "MuleRun Data Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "2b284f45-2db9-4e2e-bdc0-a9dbb136a935",
+  "meta": {
+    "instanceId": "228be343cd0459d7f6c2ffa8140d82c9884434d98555971265f9dd70ae8cbc2f"
+  },
+  "id": "3Z44CFrllBHXhBBC",
+  "tags": []
+}
